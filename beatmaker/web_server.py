@@ -135,7 +135,7 @@ class LLMPromptError(Exception):
     pass
 
 
-OPENCODE_MODEL = os.environ.get("BEATMAKER_LLM_MODEL", "opencode-go/deepseek-v4-flash")
+OPENCODE_MODEL = os.environ.get("BEATMAKER_LLM_MODEL", "opencode-go/muse-spark-1.2-contributor")
 _OPENCODE_BIN: Optional[str] = shutil.which("opencode") or os.environ.get("OPENCODE_BIN")
 
 
