@@ -5,46 +5,66 @@
 *{box-sizing:border-box}body{margin:0;background:#0b0f1a;color:#e8e6e3;font-family:ui-monospace,monospace}
 a{color:#a78bfa}header{padding:18px 24px;border-bottom:1px solid #1e2640;display:flex;align-items:center;gap:12px}
 h1{margin:0;font-size:18px;color:#a78bfa} .sub{color:#8b93a8;font-size:12px}
-.wrap{max-width:960px;margin:0 auto;padding:24px;display:grid;grid-template-columns:360px 1fr;gap:24px}
-@media(max-width:800px){.wrap{grid-template-columns:1fr}}
+.wrap{max-width:980px;margin:0 auto;padding:24px;display:grid;grid-template-columns:380px 1fr;gap:24px}
+@media(max-width:860px){.wrap{grid-template-columns:1fr}}
 .card{background:#141a2b;border:1px solid #2a3450;border-radius:12px;padding:18px}
 label{display:block;font-size:11px;color:#8b93a8;margin:10px 0 6px;text-transform:uppercase;letter-spacing:.06em}
-select,input{width:100%;padding:10px 11px;border-radius:8px;border:1px solid #2a3450;background:#0b0f1a;color:#e8e6e3;font-family:monospace;outline:none}
-select:focus,input:focus{border-color:#a78bfa}
+select,input,textarea{width:100%;padding:10px 11px;border-radius:8px;border:1px solid #2a3450;background:#0b0f1a;color:#e8e6e3;font-family:monospace;outline:none}
+select:focus,input:focus,textarea:focus{border-color:#a78bfa}
+textarea{resize:vertical;min-height:72px}
 .row{display:flex;gap:10px}.row>*{flex:1}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .chip{padding:6px 10px;border-radius:999px;border:1px solid #2a3450;background:#0b0f1a;color:#e8e6e3;font-size:12px;cursor:pointer;user-select:none}
 .chip.on{background:#a78bfa;color:#0b0f1a;border-color:#a78bfa;font-weight:700}
 .btn{width:100%;padding:12px;border:0;border-radius:10px;background:#a78bfa;color:#0b0f1a;font-weight:800;cursor:pointer;font-family:monospace;font-size:14px;margin-top:14px}
+.btn.secondary{background:#1e2640;color:#e8e6e3;border:1px solid #2a3450}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .muted{color:#8b93a8;font-size:12px;margin-top:8px}
 audio{width:100%;margin-top:10px}
-.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#1e2640;border:1px solid #2a3450;font-size:11px;color:#cbd5e1;margin-right:6px}
+.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#1e2640;border:1px solid #2a3450;font-size:11px;color:#cbd5e1;margin-right:6px;margin-bottom:4px}
 .links a{margin-right:10px;font-size:13px}
-pre{white-space:pre-wrap;word-break:break-word;background:#0b0f1a;border:1px solid #1e2640;border-radius:8px;padding:10px;font-size:12px;max-height:240px;overflow:auto}
+pre{white-space:pre-wrap;word-break:break-word;background:#0b0f1a;border:1px solid #1e2640;border-radius:8px;padding:10px;font-size:12px;max-height:260px;overflow:auto}
+details{margin-top:14px;border:1px solid #1e2640;border-radius:10px;padding:10px 12px;background:#0f1426}
+details summary{cursor:pointer;color:#a78bfa;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+.prompt-row{display:flex;gap:8px;align-items:flex-end}
+.prompt-row textarea{flex:1}
+.samples{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.sample{font-size:11px;padding:4px 8px;border-radius:999px;background:#0b0f1a;border:1px solid #2a3450;color:#8b93a8;cursor:pointer}
+.sample:hover{border-color:#a78bfa;color:#e8e6e3}
 </style></head><body>
-<header><h1>🎵 beatmaker</h1><span class="sub">loop-based procedural studio — no AI · MCP ready</span><span style="margin-left:auto;font-size:12px" id="tokBadge"></span></header>
+<header><h1>🎵 beatmaker</h1><span class="sub">loop-based studio — prompt → LLM → MIDI → MP3</span><span style="margin-left:auto;font-size:12px" id="tokBadge"></span></header>
 <div class="wrap">
   <div class="card">
-    <label>Duration (seconds)</label>
-    <input id="duration" type="number" min="10" max="300" value="30">
-    <div class="row">
-      <div><label>Genre</label><select id="genre"></select></div>
-      <div><label>Situation</label><select id="situation"></select></div>
+    <label>Describe a situation / vibe</label>
+    <div class="prompt-row">
+      <textarea id="prompt" placeholder="early morning coastal town where boats are nearing the shore after fishing"></textarea>
     </div>
-    <div class="row">
-      <div><label>Mood</label><select id="mood"></select></div>
-      <div><label>Key</label><select id="key"></select></div>
-    </div>
-    <div class="row">
-      <div><label>BPM (empty = auto)</label><input id="bpm" type="number" placeholder="auto" min="60" max="180"></div>
-      <div><label>Seed (optional)</label><input id="seed" type="number" placeholder="random"></div>
-    </div>
-    <label>Instruments (max 5)</label>
-    <div id="chips" class="chips"></div>
-    <div class="muted">Locked to 5 instruments — drums, bass, piano, guitar, synth</div>
-    <button id="gen" class="btn">Generate beat → play + download</button>
-    <div id="status" class="muted"></div>
+    <div class="samples" id="samples"></div>
+    <button id="promptBtn" class="btn">✨ Generate from prompt</button>
+    <div id="promptStatus" class="muted"></div>
+
+    <details id="adv">
+      <summary>Advanced — manual controls</summary>
+      <label>Duration (seconds)</label>
+      <input id="duration" type="number" min="10" max="300" value="30">
+      <div class="row">
+        <div><label>Genre</label><select id="genre"></select></div>
+        <div><label>Situation</label><select id="situation"></select></div>
+      </div>
+      <div class="row">
+        <div><label>Mood</label><select id="mood"></select></div>
+        <div><label>Key</label><select id="key"></select></div>
+      </div>
+      <div class="row">
+        <div><label>BPM (empty = auto)</label><input id="bpm" type="number" placeholder="auto" min="60" max="180"></div>
+        <div><label>Seed</label><input id="seed" type="number" placeholder="random"></div>
+      </div>
+      <label>Instruments (max 5)</label>
+      <div id="chips" class="chips"></div>
+      <div class="muted">Locked to 5: drums, bass, piano, guitar, synth</div>
+      <button id="gen" class="btn secondary">Generate (manual params)</button>
+      <div id="status" class="muted"></div>
+    </details>
   </div>
   <div class="card">
     <div style="font-size:12px;color:#8b93a8;margin-bottom:8px">OUTPUT</div>
@@ -52,7 +72,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:#0b0f1a;border:1px sol
     <audio id="player" controls style="display:none"></audio>
     <div id="links" class="links" style="margin-top:10px"></div>
     <pre id="json" style="display:none"></pre>
-    <div class="muted" style="margin-top:12px">MCP: <code>/mcp</code> · tools: <code>generate_beat</code>, <code>list_instruments</code>, <code>list_options</code><br>All beats are procedural MIDI → FluidSynth → WAV → MP3. No external API.</div>
+    <div class="muted" style="margin-top:12px">Prompt → LLM (deepseek) → <code>generate_beat</code> → FluidSynth → MP3. MCP: <code>/mcp</code><br>All beats procedural — no AI audio. <code>POST /api/prompt {prompt}</code> or <code>POST /api/generate</code>.</div>
   </div>
 </div>
 <script>
@@ -62,6 +82,23 @@ const TOK=getToken();
 if(TOK) localStorage.setItem("beatmaker_token", TOK);
 $("tokBadge").textContent = TOK ? "token ✓" : "no token";
 
+const SAMPLES=[
+  "early morning coastal town where boats are nearing the shore after fishing",
+  "rainy night studying in a dorm room, lofi window view",
+  "sunset workout on a rooftop, high energy",
+  "quiet meditation in a mountain temple at dawn",
+  "neon party in the city, midnight drive",
+];
+
+function fillSamples(){
+  const c=$("samples");
+  SAMPLES.forEach(s=>{
+    const b=document.createElement("button"); b.className="sample"; b.textContent=s.slice(0,42)+"…"; b.title=s;
+    b.onclick=()=>{ $("prompt").value=s; };
+    c.appendChild(b);
+  });
+}
+
 async function loadOptions(){
   const r=await fetch("/api/options?token="+encodeURIComponent(TOK));
   const j=await r.json();
@@ -70,19 +107,47 @@ async function loadOptions(){
   for(const m of j.moods){ const o=document.createElement("option"); o.value=m; o.textContent=m; $("mood").appendChild(o); }
   for(const k of j.keys){ const o=document.createElement("option"); o.value=k; o.textContent=k; $("key").appendChild(o); }
   $("genre").value="lofi"; $("situation").value="chill"; $("mood").value="chill"; $("key").value="C";
-  // chips
   const labels={drums:"Drums",bass:"Bass",piano:"Piano",guitar:"Guitar",synth:"Synth"};
   for(const id of Object.keys(j.instruments)){
     const d=document.createElement("div"); d.className="chip on"; d.dataset.id=id; d.textContent=labels[id]||id;
     d.onclick=()=>{ d.classList.toggle("on"); const on=[...document.querySelectorAll(".chip.on")]; if(on.length>5){ d.classList.remove("on"); alert("max 5 instruments"); } };
     $("chips").appendChild(d);
   }
-  // auto bpm hint from situation
   $("situation").addEventListener("change",()=>{
     const def=j.defaults[$("situation").value]; if(def){ $("genre").value=def.genre; $("mood").value=def.mood; $("bpm").placeholder="auto ("+def.bpm+")"; }
   });
   $("situation").dispatchEvent(new Event("change"));
 }
+
+function showOutput(j){
+  $("meta").innerHTML=`<span class=badge>${j.genre}</span><span class=badge>${j.mood}</span><span class=badge>${j.key} ${j.bpm} BPM</span><span class=badge>${j.duration}s</span><span class=badge>${(j.instruments||[]).join(", ")}</span>` + (j.prompt?`<div class=muted style="margin-top:6px">“${j.prompt}” → ${j.resolved_params?JSON.stringify(j.resolved_params):""}</div>`:"");
+  const mp3=j.files.mp3, wav=j.files.wav, midi=j.files.midi;
+  const tokQ="token="+encodeURIComponent(TOK);
+  if(mp3){ $("player").src=mp3+"?"+tokQ; $("player").style.display="block"; $("player").play().catch(()=>{}); }
+  let links="";
+  if(mp3) links+=`<a href="${mp3}?${tokQ}" download>⬇ MP3</a>`;
+  if(wav) links+=`<a href="${wav}?${tokQ}" download>⬇ WAV</a>`;
+  if(midi) links+=`<a href="${midi}?${tokQ}" download>⬇ MIDI</a>`;
+  $("links").innerHTML=links;
+  $("json").textContent=JSON.stringify(j,null,2); $("json").style.display="block";
+}
+
+$("promptBtn").onclick=async()=>{
+  const prompt=$("prompt").value.trim();
+  if(!prompt){ alert("Describe a situation first — e.g. 'early morning coastal town...'"); return; }
+  $("promptBtn").disabled=true; $("promptStatus").textContent="LLM parsing prompt → generating beat…";
+  $("meta").innerHTML=""; $("links").innerHTML=""; $("json").style.display="none"; $("player").style.display="none";
+  try{
+    const body={prompt, duration: parseInt($("duration").value)||undefined};
+    const r=await fetch("/api/prompt?token="+encodeURIComponent(TOK),{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOK},body:JSON.stringify(body)});
+    if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,800)); }
+    const j=await r.json();
+    $("promptStatus").textContent=`done ✓ — ${j.genre} · ${j.mood} · ${j.bpm} BPM · ${j.bars} bars`;
+    showOutput(j);
+  }catch(e){ $("promptStatus").textContent="error: "+e.message; }
+  finally{ $("promptBtn").disabled=false; }
+};
+
 $("gen").onclick=async()=>{
   const instruments=[...document.querySelectorAll(".chip.on")].map(c=>c.dataset.id);
   if(!instruments.length){ alert("pick at least 1 instrument"); return; }
@@ -93,25 +158,18 @@ $("gen").onclick=async()=>{
     bpm: $("bpm").value ? parseInt($("bpm").value) : null,
     seed: $("seed").value ? parseInt($("seed").value) : null
   };
-  $("gen").disabled=true; $("status").textContent="generating… (MIDI → FluidSynth → MP3)";
+  $("gen").disabled=true; $("status").textContent="generating…";
   $("meta").innerHTML=""; $("links").innerHTML=""; $("json").style.display="none"; $("player").style.display="none";
   try{
     const r=await fetch("/api/generate?token="+encodeURIComponent(TOK),{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOK},body:JSON.stringify(body)});
     if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,600)); }
     const j=await r.json();
     $("status").textContent="done ✓ — "+j.bars+" bars @ "+j.bpm+" BPM";
-    $("meta").innerHTML=`<span class=badge>${j.genre}</span><span class=badge>${j.situation}</span><span class=badge>${j.key} ${j.mood}</span><span class=badge>${j.bpm} BPM</span><span class=badge>${j.duration}s</span><span class=badge>${j.instruments.join(", ")}</span>`;
-    const mp3=j.files.mp3, wav=j.files.wav, midi=j.files.midi;
-    const tokQ="token="+encodeURIComponent(TOK);
-    if(mp3){ $("player").src=mp3+"?"+tokQ; $("player").style.display="block"; $("player").play().catch(()=>{}); }
-    let links="";
-    if(mp3) links+=`<a href="${mp3}?${tokQ}" download>⬇ MP3</a>`;
-    if(wav) links+=`<a href="${wav}?${tokQ}" download>⬇ WAV</a>`;
-    if(midi) links+=`<a href="${midi}?${tokQ}" download>⬇ MIDI</a>`;
-    $("links").innerHTML=links;
-    $("json").textContent=JSON.stringify(j,null,2); $("json").style.display="block";
+    showOutput(j);
   }catch(e){ $("status").textContent="error: "+e.message; }
   finally{ $("gen").disabled=false; }
 };
+
+fillSamples();
 loadOptions();
 </script></body></html>

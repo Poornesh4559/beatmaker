@@ -1,13 +1,13 @@
 
 """beatmaker web server — studio UI + API + MCP over HTTP."""
 from __future__ import annotations
-import os, hmac, secrets, json, asyncio
+import os, hmac, secrets, json, asyncio, re, shutil
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from beatmaker.engine import INSTRUMENTS, GENRES, SITUATIONS, MOODS, KEYS, SITUATION_DEFAULTS
 import beatmaker.mcp_server as mcp_mod
@@ -119,3 +119,147 @@ async def serve_output(name: str, request: Request):
 
 # mount mcp
 app.mount("/mcp", mcp_app)
+
+
+# ── prompt → LLM → MCP generate_beat (coastal vibe etc) ──────────────
+class PromptRequest(BaseModel):
+    prompt: str
+    duration: Optional[int] = None  # optional override, else LLM picks 15-60
+    seed: Optional[int] = None
+
+
+class LLMPromptError(Exception):
+    pass
+
+
+OPENCODE_MODEL = os.environ.get("BEATMAKER_LLM_MODEL", "opencode-go/deepseek-v4-flash")
+_OPENCODE_BIN: Optional[str] = shutil.which("opencode") or os.environ.get("OPENCODE_BIN")
+
+
+async def _call_opencode(system: str, user: str) -> str:
+    if not _OPENCODE_BIN:
+        raise LLMPromptError("opencode binary not found — prompt box unavailable")
+    prompt = f"{system}\n\n{user}\n\nReply with ONLY JSON. Nothing else."
+    proc = await asyncio.create_subprocess_exec(
+        _OPENCODE_BIN, "run", "--model", OPENCODE_MODEL, prompt,
+        cwd=str(REPO),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=90)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise LLMPromptError("LLM timed out after 90s")
+    if proc.returncode != 0:
+        raise LLMPromptError(f"LLM exited {proc.returncode}: {err.decode(errors='replace')[:300]}")
+    return out.decode(errors="replace").strip()
+
+
+def _parse_json(text: str) -> Dict[str, Any]:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text).rstrip("`").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        s, e = text.find("{"), text.rfind("}")
+        if s == -1 or e <= s:
+            raise ValueError(f"no JSON object found; raw: {text[:400]}")
+        data = json.loads(text[s:e+1])
+    if not isinstance(data, dict):
+        raise ValueError("expected JSON object")
+    return data
+
+
+def _coerce_params(raw: Dict[str, Any], fallback_duration: Optional[int] = None) -> Dict[str, Any]:
+    genre = str(raw.get("genre", "chill")).lower()
+    if genre not in GENRES:
+        genre = "chill"
+    mood = str(raw.get("mood", "chill")).lower()
+    if mood not in MOODS:
+        mood = "chill"
+    key = str(raw.get("key", "C")).upper()
+    if key not in KEYS:
+        key = "C"
+    insts = raw.get("instruments") or raw.get("instrument") or []
+    if isinstance(insts, str):
+        insts = [insts]
+    insts = [str(x).lower() for x in insts if str(x).lower() in INSTRUMENTS][:5]
+    if not insts:
+        insts = ["drums", "bass", "piano"]
+    bpm = raw.get("bpm")
+    try:
+        bpm = int(bpm) if bpm is not None else None
+    except:
+        bpm = None
+    if bpm is not None:
+        bpm = max(60, min(180, bpm))
+    dur = fallback_duration if fallback_duration is not None else raw.get("duration")
+    try:
+        dur = int(dur) if dur is not None else 30
+    except:
+        dur = 30
+    dur = max(10, min(120, dur))
+    return {"genre": genre, "mood": mood, "key": key, "instruments": insts, "bpm": bpm, "duration": dur}
+
+
+@app.post("/api/prompt")
+async def prompt_to_beat(req: Request, body: PromptRequest):
+    require_auth(req)
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(400, "empty prompt")
+    system = (
+        "You are a music director for 'beatmaker', a loop-based procedural beat studio.\n"
+        "The user describes a SITUATION/SCENE in plain English. Map it to beat params.\n"
+        f"Genres: {', '.join(GENRES)} | Moods: {', '.join(MOODS)} | Keys: {', '.join(KEYS)} | Instruments: {', '.join(INSTRUMENTS)} (max 5).\n"
+        "Situation defaults for reference (genre/bpm/mood):\n"
+        + "\n".join(f"- {k}: {v}" for k, v in SITUATION_DEFAULTS.items()) + "\n"
+        "Rules:\n"
+        "- Pick genre that fits the scene energy (coastal morning=ambient/chill, club=edm, heist=trap).\n"
+        "- Pick mood that fits emotion (serene=dreamy, tense=dark, joyful=happy).\n"
+        "- Pick key: C/F = warm, G/D = bright, A#/E = dark.\n"
+        "- Pick instruments that fit texture (ambient needs synth+piano, energetic needs drums+bass).\n"
+        "- Pick bpm 60-180 that fits tempo of scene (slow morning 68-80, workout 128+).\n"
+        "- Pick duration 15-60 seconds for a preview (user can extend via Advanced).\n"
+        "Reply with ONLY this JSON: {\"genre\":\"...\",\"mood\":\"...\",\"key\":\"...\",\"instruments\":[\"...\"],\"bpm\":72,\"duration\":30}\n"
+        "No prose, no fences."
+    )
+    user = f"Situation: {prompt}"
+    # LLM parse, with one retry on bad JSON
+    raw: Optional[Dict[str, Any]] = None
+    last_text = ""
+    for attempt in range(2):
+        try:
+            text = await _call_opencode(system, user if attempt == 0 else f"{user}\n\nPrevious reply was invalid JSON:\n{last_text[:400]}\nFix it — ONLY JSON.")
+            last_text = text
+            raw = _parse_json(text)
+            break
+        except Exception as e:
+            last_text = str(e)
+            if attempt == 1:
+                raise HTTPException(500, f"LLM parse failed: {e}")
+    assert raw is not None
+    params = _coerce_params(raw, fallback_duration=body.duration)
+    if body.duration is not None:
+        params["duration"] = max(10, min(300, int(body.duration)))
+    if body.seed is not None:
+        seed = int(body.seed)
+    else:
+        seed = None
+    from beatmaker.engine import generate_beat
+    out = generate_beat(duration=params["duration"], genre=params["genre"], situation="chill",
+                        instruments=params["instruments"], bpm=params["bpm"], mood=params["mood"], key=params["key"], seed=seed)
+    files: Dict[str, Optional[str]] = {}
+    for k in ("midi", "wav", "mp3"):
+        p = Path(out["files"][k])
+        files[k] = f"/output/{p.name}" if p.exists() else None
+    tok = _tok(req) or ""
+    out["files"] = files
+    out["download"] = {k: f"{v}?token={tok}" for k, v in files.items() if v}
+    out["parsed_prompt"] = raw
+    out["resolved_params"] = params
+    out["prompt"] = prompt
+    return out
