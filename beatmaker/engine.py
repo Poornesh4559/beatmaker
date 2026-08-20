@@ -467,16 +467,118 @@ def render_midi(pm, midi_path, wav_path, mp3_path):
     pm.write(str(midi_path))
     sf2 = find_sf2()
     wav_done=False
+    # --- stem-normalized render: each instrument rendered separately, peak-normalized to equal loudness, then mixed ---
+    # Per-instrument mix gain after normalization (synth was hot, so pull it down)
+    MIX_GAIN = {"drums": 1.0, "bass": 0.92, "piano": 0.85, "guitar": 0.85, "synth": 0.62}
+    STEM_PEAK = 0.72  # normalize each stem to this peak before gain
+    FINAL_PEAK = 0.85
+    stems = []
+    stems_ok = False
     try:
-        y = pm.fluidsynth(fs=str(sf2) if sf2 else None)
         import soundfile as sf, numpy as np
-        if y.ndim>1: y=y.mean(axis=0)
-        peak = float(abs(y).max()) if y.size else 1
-        if peak>0.01: y=y/peak*0.85
-        sf.write(str(wav_path), y, 44100)
-        wav_done=True
+        # Try python fluidsynth per-stem
+        y_test = None
+        try:
+            # per-instrument render via pretty_midi fluidsynth
+            for inst in pm.instruments:
+                pm_one = pretty_midi.PrettyMIDI(initial_tempo=pm._tick_scales[0][1] if hasattr(pm, '_tick_scales') and pm._tick_scales else 120)
+                # copy tempo
+                pm_one._tick_scales = list(pm._tick_scales) if hasattr(pm, '_tick_scales') else pm_one._tick_scales
+                # clone instrument
+                clone = pretty_midi.Instrument(program=inst.program, is_drum=inst.is_drum, name=inst.name)
+                clone.notes = list(inst.notes)
+                clone.pitch_bends = list(inst.pitch_bends)
+                clone.control_changes = list(inst.control_changes)
+                pm_one.instruments.append(clone)
+                y = pm_one.fluidsynth(fs=str(sf2) if sf2 else None)
+                if y is None or y.size == 0:
+                    raise RuntimeError("empty stem")
+                if y.ndim > 1:
+                    y = y.mean(axis=0)
+                y = y.astype(np.float32)
+                # peak-normalize stem
+                peak = float(np.abs(y).max()) if y.size else 0
+                if peak > 0.005:
+                    y = y / peak * STEM_PEAK
+                # apply mix gain
+                g = MIX_GAIN.get(inst.name, 0.85)
+                y = y * g
+                stems.append(y)
+            if stems:
+                stems_ok = True
+        except Exception as e:
+            # python fluidsynth not available — fall through to binary per-stem
+            stems = []
+            stems_ok = False
+            # print for log
+            print(f"stem python fluidsynth failed: {e}")
+        if not stems_ok and sf2 and Path("/usr/bin/fluidsynth").exists():
+            # binary per-stem: write temp midi per instrument, render wav, load, normalize
+            import tempfile, os as _os
+            stems = []
+            for inst in pm.instruments:
+                try:
+                    _bpm = float(pm.get_tempo_changes()[1][0]) if len(pm.get_tempo_changes()[1]) else 120
+                except:
+                    _bpm = 120
+                pm_one = pretty_midi.PrettyMIDI(initial_tempo=_bpm)
+                clone = pretty_midi.Instrument(program=inst.program, is_drum=inst.is_drum, name=inst.name)
+                clone.notes = list(inst.notes)
+                pm_one.instruments.append(clone)
+                with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as tf_mid:
+                    pm_one.write(tf_mid.name)
+                    stem_wav = tf_mid.name + ".wav"
+                    cmd = f"fluidsynth -ni -F {shlex.quote(stem_wav)} {shlex.quote(str(sf2))} {shlex.quote(tf_mid.name)} -r 44100 2>/dev/null"
+                    subprocess.run(cmd, shell=True, timeout=20)
+                    if Path(stem_wav).exists():
+                        try:
+                            y, sr = sf.read(stem_wav)
+                            if y.ndim > 1:
+                                y = y.mean(axis=1)
+                            y = y.astype(np.float32)
+                            peak = float(np.abs(y).max()) if y.size else 0
+                            if peak > 0.005:
+                                y = y / peak * STEM_PEAK
+                            y = y * MIX_GAIN.get(inst.name, 0.85)
+                            stems.append(y)
+                        except Exception as _e2:
+                            print(f"stem wav read failed {inst.name}: {_e2}")
+                        finally:
+                            try: Path(stem_wav).unlink()
+                            except: pass
+                    try: Path(tf_mid.name).unlink()
+                    except: pass
+            if stems:
+                stems_ok = True
+        if stems_ok and stems:
+            # pad to same length and sum
+            max_len = max(len(s) for s in stems)
+            mix = np.zeros(max_len, dtype=np.float32)
+            for s in stems:
+                mix[:len(s)] += s
+            # final peak normalize
+            peak = float(np.abs(mix).max()) if mix.size else 1
+            if peak > 0.01:
+                mix = mix / peak * FINAL_PEAK
+            # soft clip
+            mix = np.clip(mix, -1.0, 1.0)
+            sf.write(str(wav_path), mix, 44100)
+            wav_done = True
     except Exception as e:
-        print(f"python fluidsynth fallback: {e}")
+        print(f"stem-normalized render failed: {e}")
+    # fallback: single-file render (old path)
+    if not wav_done:
+        wav_done=False
+        try:
+            y = pm.fluidsynth(fs=str(sf2) if sf2 else None)
+            import soundfile as sf, numpy as np
+            if y.ndim>1: y=y.mean(axis=0)
+            peak = float(abs(y).max()) if y.size else 1
+            if peak>0.01: y=y/peak*0.85
+            sf.write(str(wav_path), y, 44100)
+            wav_done=True
+        except Exception as e:
+            print(f"python fluidsynth fallback: {e}")
     if not wav_done:
         if sf2 and Path("/usr/bin/fluidsynth").exists():
             cmd = f"fluidsynth -ni -F {shlex.quote(str(wav_path))} {shlex.quote(str(sf2))} {shlex.quote(str(midi_path))} -r 44100"
