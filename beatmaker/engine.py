@@ -339,41 +339,41 @@ def _write_piano_factory(genre, rng, variant_override=None):
             if genre in ("lofi","ambient","chill"):
                 if variant==0:  # arpeggio up
                     for i, n in enumerate(chord):
-                        inst.notes.append(pretty_midi.Note(_human_vel(64,rng2,6), n, _human_time(base+i*beat*0.5,rng2,0.015), base+i*beat*0.5+beat*0.48))
+                        inst.notes.append(pretty_midi.Note(_human_vel(52,rng2,5), n, _human_time(base+i*beat*0.5,rng2,0.015), base+i*beat*0.5+beat*0.48))
                     for i, n in enumerate(reversed(chord)):
-                        inst.notes.append(pretty_midi.Note(_human_vel(60,rng2,6), n+12, base+2*beat+i*beat*0.5, base+2*beat+i*beat*0.5+0.4))
+                        inst.notes.append(pretty_midi.Note(_human_vel(50,rng2,5), n+12, base+2*beat+i*beat*0.5, base+2*beat+i*beat*0.5+0.4))
                 elif variant==1:  # block with soft rhythm
                     for b in [0,2]:
-                        vel = _human_vel(68,rng2,5) if b==0 else _human_vel(62,rng2,5)
+                        vel = _human_vel(56,rng2,4) if b==0 else _human_vel(52,rng2,4)
                         for n in chord:
                             inst.notes.append(pretty_midi.Note(vel, n, _human_time(base+b*beat,rng2,0.018), base+b*beat+beat*1.75))
                         # add 9th occasionally
                         if rng2.random()<0.3:
-                            inst.notes.append(pretty_midi.Note(52, chord[0]+14, base+b*beat, base+b*beat+beat*1.75))
+                            inst.notes.append(pretty_midi.Note(44, chord[0]+14, base+b*beat, base+b*beat+beat*1.75))
                 else:  # sparse single notes
                     for i, b in enumerate([0, 1.5, 3]):
                         n = chord[i % len(chord)]
-                        inst.notes.append(pretty_midi.Note(_human_vel(66,rng2,6), n+ (12 if i==2 else 0), _human_time(base+b*beat,rng2,0.02), base+b*beat+0.9*beat))
+                        inst.notes.append(pretty_midi.Note(_human_vel(54,rng2,5), n+ (12 if i==2 else 0), _human_time(base+b*beat,rng2,0.015), base+b*beat+0.85*beat))
             elif genre=="edm":
                 if variant==0:
                     for b in range(4):
                         for n in chord:
-                            inst.notes.append(pretty_midi.Note(_human_vel(80,rng2,6), n, base+b*beat, base+b*beat+0.34))
+                            inst.notes.append(pretty_midi.Note(_human_vel(64,rng2,5), n, base+b*beat, base+b*beat+0.32))
                 elif variant==1:  # sidechain feel: accent 1 and 3
-                    for b, vel in [(0,88),(1,52),(2,84),(3,50)]:
+                    for b, vel in [(0,68),(1,44),(2,64),(3,42)]:
                         for n in chord:
                             inst.notes.append(pretty_midi.Note(vel, n, base+b*beat, base+b*beat+0.32))
                 else:  # pluck
                     for i in range(8):
                         n = chord[i % len(chord)]
-                        inst.notes.append(pretty_midi.Note(_human_vel(74,rng2,6), n+12, base+i*beat*0.5, base+i*beat*0.5+0.22))
+                        inst.notes.append(pretty_midi.Note(_human_vel(62,rng2,5), n+12, base+i*beat*0.5, base+i*beat*0.5+0.22))
             elif genre=="jazz":
                 # shell voicing + occasional stab
                 rootless = chord[1:]  # 3-7-9
                 for n in rootless:
-                    inst.notes.append(pretty_midi.Note(_human_vel(62,rng2,5), n+12, _human_time(base,rng2,0.015), base+sec_per_bar*0.48))
+                    inst.notes.append(pretty_midi.Note(_human_vel(52,rng2,4), n+12, _human_time(base,rng2,0.012), base+sec_per_bar*0.48))
                 for n in chord:
-                    inst.notes.append(pretty_midi.Note(_human_vel(58,rng2,5), n+12, _human_time(base+2*beat,rng2,0.015), base+sec_per_bar-0.05))
+                    inst.notes.append(pretty_midi.Note(_human_vel(48,rng2,4), n+12, _human_time(base+2*beat,rng2,0.012), base+sec_per_bar-0.05))
                 if variant==2 and rng2.random()<0.4:
                     inst.notes.append(pretty_midi.Note(70, chord[0]+19, base+1*beat, base+1*beat+0.25))
             else:  # hiphop/trap/rock
@@ -383,15 +383,15 @@ def _write_piano_factory(genre, rng, variant_override=None):
                             inst.notes.append(pretty_midi.Note(_human_vel(74,rng2,5), n, _human_time(base+b*beat,rng2,0.015), base+b*beat+beat*1.78))
                 elif variant==1:  # stab
                     for n in chord:
-                        inst.notes.append(pretty_midi.Note(84, n, base, base+0.4*beat))
+                        inst.notes.append(pretty_midi.Note(62, n, base, base+0.4*beat))
                     for n in chord:
-                        inst.notes.append(pretty_midi.Note(76, n, base+2*beat, base+2*beat+1.7*beat))
+                        inst.notes.append(pretty_midi.Note(56, n, base+2*beat, base+2*beat+1.7*beat))
                 else:  # octaves
                     for n in chord[:1]:
-                        inst.notes.append(pretty_midi.Note(78, n, base, base+1.9*beat))
-                        inst.notes.append(pretty_midi.Note(78, n+12, base, base+1.9*beat))
-                        inst.notes.append(pretty_midi.Note(74, chord[1], base+2*beat, base+3.85*beat))
-                        inst.notes.append(pretty_midi.Note(74, chord[1]+12, base+2*beat, base+3.85*beat))
+                        inst.notes.append(pretty_midi.Note(58, n, base, base+1.9*beat))
+                        inst.notes.append(pretty_midi.Note(58, n+12, base, base+1.9*beat))
+                        inst.notes.append(pretty_midi.Note(54, chord[1], base+2*beat, base+3.85*beat))
+                        inst.notes.append(pretty_midi.Note(54, chord[1]+12, base+2*beat, base+3.85*beat))
     return _write
 
 def _write_guitar(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng, variant_override=None):
@@ -438,7 +438,7 @@ def _write_synth_factory(mood, rng, variant_override=None):
             base = bar*sec_per_bar
             if variant==0:  # pad hold
                 for n in chord:
-                    inst.notes.append(pretty_midi.Note(_human_vel(54,rng2,6), n+12, _human_time(base,rng2,0.01), base+sec_per_bar-0.05))
+                    inst.notes.append(pretty_midi.Note(_human_vel(46,rng2,5), n+12, _human_time(base,rng2,0.008), base+sec_per_bar-0.05))
                 if mood=="energetic" and bar%2==0 and rng2.random()<0.7:
                     lead = chord[1]+12
                     inst.notes.append(pretty_midi.Note(_human_vel(74,rng2,5), lead, base+1.5*60.0/bpm, base+2.5*60.0/bpm))
@@ -451,7 +451,7 @@ def _write_synth_factory(mood, rng, variant_override=None):
                     n = arp[i % len(arp)]
                     # every 4th bar double time
                     dur = 0.22 if (bar%4==3 and i>=4) else 0.28
-                    inst.notes.append(pretty_midi.Note(_human_vel(60,rng2,7), n+12, base+i*sec_per_bar/8, base+i*sec_per_bar/8+dur))
+                    inst.notes.append(pretty_midi.Note(_human_vel(52,rng2,5), n+12, base+i*sec_per_bar/8, base+i*sec_per_bar/8+dur))
             else:  # pulse + lead
                 # pulse on beats
                 for b in range(4):

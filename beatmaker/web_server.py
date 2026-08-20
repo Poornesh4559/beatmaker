@@ -257,12 +257,17 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
         "No prose, no fences."
     )
     user = f"Situation: {prompt}"
+    # Best practice for randomness per web research: LLMs at low temp are deterministic for same prompt.
+    # Add a short random nonce to the user message so same text still samples differently (temperature + nonce).
+    # Also instruct LLM to VARY — don't repeat same variant picks.
+    nonce = secrets.token_hex(2)  # 4 hex chars, cheap entropy
+    user_with_nonce = f"{user} [variation seed: {nonce} — pick variants/progression differently each time even for similar prompts]"
     # LLM parse, with one retry on bad JSON
     raw: Optional[Dict[str, Any]] = None
     last_text = ""
     for attempt in range(2):
         try:
-            text = await _call_opencode(system, user if attempt == 0 else f"{user}\n\nPrevious reply was invalid JSON:\n{last_text[:400]}\nFix it — ONLY JSON.")
+            text = await _call_opencode(system, user_with_nonce if attempt == 0 else f"{user_with_nonce}\n\nPrevious reply was invalid JSON:\n{last_text[:400]}\nFix it — ONLY JSON.")
             last_text = text
             raw = _parse_json(text)
             break
@@ -286,7 +291,9 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
     if body.seed is not None:
         seed = int(body.seed)
     else:
-        seed = None
+        # Random seed when user doesn't pin one — true per-call variation even for same prompt text.
+        # Engine uses Random(seed) for prog/variant picks, so random seed = different feel each hit.
+        seed = secrets.randbits(31)
     from beatmaker.engine import generate_beat
     out = generate_beat(duration=params["duration"], genre=params["genre"], situation="chill",
                         instruments=params["instruments"], bpm=params["bpm"], mood=params["mood"], key=params["key"], seed=seed,
