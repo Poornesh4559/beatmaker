@@ -205,7 +205,26 @@ def _coerce_params(raw: Dict[str, Any], fallback_duration: Optional[int] = None)
     except:
         dur = 30
     dur = max(10, min(120, dur))
-    return {"genre": genre, "mood": mood, "key": key, "instruments": insts, "bpm": bpm, "duration": dur}
+    # per-instrument variants + progression — LLM can pin 0-2 / 0-5, or leave None for random
+    def _var(v):
+        try:
+            iv = int(v)
+            return iv if 0 <= iv <= 2 else None
+        except: return None
+    def _prog(v):
+        try:
+            iv = int(v)
+            return iv if 0 <= iv <= 5 else None
+        except: return None
+    variants = {
+        "drums_variant": _var(raw.get("drums_variant")),
+        "bass_variant": _var(raw.get("bass_variant")),
+        "piano_variant": _var(raw.get("piano_variant")),
+        "guitar_variant": _var(raw.get("guitar_variant")),
+        "synth_variant": _var(raw.get("synth_variant")),
+        "progression_idx": _prog(raw.get("progression_idx")),
+    }
+    return {"genre": genre, "mood": mood, "key": key, "instruments": insts, "bpm": bpm, "duration": dur, **variants}
 
 
 @app.post("/api/prompt")
@@ -216,18 +235,25 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
         raise HTTPException(400, "empty prompt")
     system = (
         "You are a music director for 'beatmaker', a loop-based procedural beat studio.\n"
-        "The user describes a SITUATION/SCENE in plain English. Map it to beat params.\n"
+        "The user describes a SITUATION/SCENE in plain English. Map it to beat params WITH VARIATION.\n"
         f"Genres: {', '.join(GENRES)} | Moods: {', '.join(MOODS)} | Keys: {', '.join(KEYS)} | Instruments: {', '.join(INSTRUMENTS)} (max 5).\n"
         "Situation defaults for reference (genre/bpm/mood):\n"
         + "\n".join(f"- {k}: {v}" for k, v in SITUATION_DEFAULTS.items()) + "\n"
+        "VARIATION KNOBS (use them! different prompts should give different feels):\n"
+        "- progression_idx 0-5: chord progression (0=warm, 2=tense, 5=jazzy). Pick differently per prompt mood.\n"
+        "- drums_variant 0-2: 0=straight/boom,1=syncopated/rim,2=busy/fills.\n"
+        "- bass_variant 0-2: 0=roots,1=syncopated,2=walking.\n"
+        "- piano_variant 0-2: 0=arp,1=block,2=sparse.\n"
+        "- guitar_variant 0-2: 0=strum,1=fingerpick,2=mutes.\n"
+        "- synth_variant 0-2: 0=pad,1=arp,2=pulse.\n"
         "Rules:\n"
-        "- Pick genre that fits the scene energy (coastal morning=ambient/chill, club=edm, heist=trap).\n"
+        "- Pick genre that fits scene energy (coastal morning=ambient/chill, club=edm, heist=trap).\n"
         "- Pick mood that fits emotion (serene=dreamy, tense=dark, joyful=happy).\n"
-        "- Pick key: C/F = warm, G/D = bright, A#/E = dark.\n"
-        "- Pick instruments that fit texture (ambient needs synth+piano, energetic needs drums+bass).\n"
-        "- Pick bpm 60-180 that fits tempo of scene (slow morning 68-80, workout 128+).\n"
-        "- Pick duration 15-60 seconds for a preview (user can extend via Advanced).\n"
-        "Reply with ONLY this JSON: {\"genre\":\"...\",\"mood\":\"...\",\"key\":\"...\",\"instruments\":[\"...\"],\"bpm\":72,\"duration\":30}\n"
+        "- Pick key: C/F=warm, G/D=bright, A#/E=dark. VARY key across prompts.\n"
+        "- Pick instruments that fit texture. VARY them — coastal might be piano+synth one time, guitar+bass another.\n"
+        "- Pick bpm 60-180 that fits tempo. VARY bpm even within same mood.\n"
+        "- ALWAYS set at least 3 variant knobs to non-None values — this is how variation happens.\n"
+        "Reply with ONLY this JSON: {\"genre\":\"...\",\"mood\":\"...\",\"key\":\"...\",\"instruments\":[\"...\"],\"bpm\":72,\"duration\":30,\"progression_idx\":2,\"drums_variant\":1,\"bass_variant\":0,\"piano_variant\":2,\"guitar_variant\":0,\"synth_variant\":1}\n"
         "No prose, no fences."
     )
     user = f"Situation: {prompt}"
@@ -263,7 +289,10 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
         seed = None
     from beatmaker.engine import generate_beat
     out = generate_beat(duration=params["duration"], genre=params["genre"], situation="chill",
-                        instruments=params["instruments"], bpm=params["bpm"], mood=params["mood"], key=params["key"], seed=seed)
+                        instruments=params["instruments"], bpm=params["bpm"], mood=params["mood"], key=params["key"], seed=seed,
+                        drums_variant=params.get("drums_variant"), bass_variant=params.get("bass_variant"),
+                        piano_variant=params.get("piano_variant"), guitar_variant=params.get("guitar_variant"),
+                        synth_variant=params.get("synth_variant"), progression_idx=params.get("progression_idx"))
     files: Dict[str, Optional[str]] = {}
     for k in ("midi", "wav", "mp3"):
         p = Path(out["files"][k])

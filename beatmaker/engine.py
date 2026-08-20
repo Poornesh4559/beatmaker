@@ -77,7 +77,10 @@ def _human_vel(base: int, rng, jitter=8):
 def _human_time(t: float, rng, jitter=0.015):
     return max(0, t + rng.uniform(-jitter, jitter))
 
-def build_midi(duration, genre, situation, instruments, bpm=None, key="C", mood="chill", seed=None):
+def build_midi(duration, genre, situation, instruments, bpm=None, key="C", mood="chill", seed=None,
+             drums_variant: int | None = None, bass_variant: int | None = None,
+             piano_variant: int | None = None, guitar_variant: int | None = None,
+             synth_variant: int | None = None, progression_idx: int | None = None):
     rng = random.Random(seed) if seed is not None else random.Random()
     genre = genre if genre in GENRES else "lofi"
     key = key if key in KEYS else "C"
@@ -89,8 +92,11 @@ def build_midi(duration, genre, situation, instruments, bpm=None, key="C", mood=
     scale = "minor" if mood in ("melancholic","dark","dreamy") else "major"
     if genre in ("ambient","lofi") and mood=="chill":
         scale="major"
-    # pick progression with rng (not global random)
-    prog = rng.choice(PROGRESSIONS[genre])
+    # progression: LLM can pin it, else random
+    if progression_idx is not None and 0 <= progression_idx < len(PROGRESSIONS[genre]):
+        prog = PROGRESSIONS[genre][progression_idx]
+    else:
+        prog = rng.choice(PROGRESSIONS[genre])
     # occasionally randomize one chord for variation (10% bars get substitute)
     root_pc = _key_to_root(key)
     root_midi = 48 + root_pc
@@ -98,6 +104,14 @@ def build_midi(duration, genre, situation, instruments, bpm=None, key="C", mood=
     sec_per_bar = sec_per_beat * 4
     n_bars = max(1, math.ceil(duration / sec_per_bar))
     pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+    # resolve variants: LLM pin or rng pick, exposed in return for caller
+    dv = drums_variant if drums_variant in (0,1,2) else rng.randint(0,2)
+    bv = bass_variant if bass_variant in (0,1,2) else rng.randint(0,2)
+    gv = guitar_variant if guitar_variant in (0,1,2) else rng.randint(0,2)
+    pv = piano_variant if piano_variant in (0,1,2) else rng.randint(0,2)
+    sv = synth_variant if synth_variant in (0,1,2) else rng.randint(0,2)
+    prog_idx_used = PROGRESSIONS[genre].index(prog) if prog in PROGRESSIONS[genre] else 0
+    chosen = {"drums": dv, "bass": bv, "piano": pv, "guitar": gv, "synth": sv, "progression_idx": prog_idx_used}
     def add_inst(name, fn):
         cfg = INSTRUMENTS[name]
         inst = pretty_midi.Instrument(program=cfg["program"], is_drum=cfg["is_drum"], name=name)
@@ -105,16 +119,16 @@ def build_midi(duration, genre, situation, instruments, bpm=None, key="C", mood=
         pm.instruments.append(inst)
     avail = [i for i in instruments if i in INSTRUMENTS]
     if not avail: avail = ["drums","bass","piano"]
-    if "drums" in avail: add_inst("drums", _write_drums_factory(genre, rng))
-    if "bass" in avail: add_inst("bass", lambda inst, spb, nb, prog, rm, sc, bpm, rng=rng: _write_bass(inst, spb, nb, prog, rm, sc, bpm, rng))
-    if "piano" in avail: add_inst("piano", _write_piano_factory(genre, rng))
-    if "guitar" in avail: add_inst("guitar", lambda inst, spb, nb, prog, rm, sc, bpm, rng=rng: _write_guitar(inst, spb, nb, prog, rm, sc, bpm, rng))
-    if "synth" in avail: add_inst("synth", _write_synth_factory(mood, rng))
-    return pm, bpm, n_bars, sec_per_bar
+    if "drums" in avail: add_inst("drums", _write_drums_factory(genre, rng, dv))
+    if "bass" in avail: add_inst("bass", lambda inst, spb, nb, prog, rm, sc, bpm, rng=rng, _bv=bv: _write_bass(inst, spb, nb, prog, rm, sc, bpm, rng, _bv))
+    if "piano" in avail: add_inst("piano", _write_piano_factory(genre, rng, pv))
+    if "guitar" in avail: add_inst("guitar", lambda inst, spb, nb, prog, rm, sc, bpm, rng=rng, _gv=gv: _write_guitar(inst, spb, nb, prog, rm, sc, bpm, rng, _gv))
+    if "synth" in avail: add_inst("synth", _write_synth_factory(mood, rng, sv))
+    return pm, bpm, n_bars, sec_per_bar, chosen
 
-def _write_drums_factory(genre, rng):
-    # pick variant
-    variant = rng.randint(0, 2)
+def _write_drums_factory(genre, rng, variant_override=None):
+    # variant can be pinned by LLM, else captured rng pick
+    variant = variant_override if variant_override is not None else rng.randint(0, 2)
     def _write(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng_inner=None):
         rng2 = rng_inner or rng
         K,S,HH,OH,CR=36,38,42,46,49
@@ -266,8 +280,8 @@ def _write_drums_factory(genre, rng):
                     inst.notes.append(pretty_midi.Note(rng2.randint(68,88), 41 if genre=="rock" else S, base+f*beat, base+f*beat+0.09))
     return _write
 
-def _write_bass(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng):
-    variant = rng.randint(0,2)
+def _write_bass(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng, variant_override=None):
+    variant = variant_override if variant_override is not None else rng.randint(0,2)
     for bar in range(n_bars):
         deg = prog[bar % len(prog)]
         # 5% chance of chromatic passing chord
@@ -300,8 +314,8 @@ def _write_bass(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng):
             # octave jump fill
             inst.notes.append(pretty_midi.Note(72, root+12, base+3.5*beat, base+3.85*beat))
 
-def _write_piano_factory(genre, rng):
-    variant = rng.randint(0,2)
+def _write_piano_factory(genre, rng, variant_override=None):
+    variant = variant_override if variant_override is not None else rng.randint(0,2)
     def _write(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng_inner=None):
         rng2 = rng_inner or rng
         for bar in range(n_bars):
@@ -380,8 +394,8 @@ def _write_piano_factory(genre, rng):
                         inst.notes.append(pretty_midi.Note(74, chord[1]+12, base+2*beat, base+3.85*beat))
     return _write
 
-def _write_guitar(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng):
-    variant = rng.randint(0,2)
+def _write_guitar(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng, variant_override=None):
+    variant = variant_override if variant_override is not None else rng.randint(0,2)
     for bar in range(n_bars):
         deg = prog[bar % len(prog)]
         chord = _chord_notes(root_midi+12, deg, scale)
@@ -412,8 +426,8 @@ def _write_guitar(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng):
                 if rng.random()<0.5:
                     inst.notes.append(pretty_midi.Note(42, notes[0], base+b*beat+0.5*beat, base+b*beat+0.5*beat+0.12))
 
-def _write_synth_factory(mood, rng):
-    variant = rng.randint(0,2)
+def _write_synth_factory(mood, rng, variant_override=None):
+    variant = variant_override if variant_override is not None else rng.randint(0,2)
     def _write(inst, sec_per_bar, n_bars, prog, root_midi, scale, bpm, rng_inner=None):
         rng2 = rng_inner or rng
         for bar in range(n_bars):
@@ -475,7 +489,8 @@ def render_midi(pm, midi_path, wav_path, mp3_path):
         subprocess.run(f"ffmpeg -y -i {shlex.quote(str(wav_path))} -codec:a libmp3lame -qscale:a 2 {shlex.quote(str(mp3_path))} 2>/dev/null", shell=True, timeout=15)
     return {"midi": str(midi_path), "wav": str(wav_path), "mp3": str(mp3_path), "sf2": str(sf2) if sf2 else None}
 
-def generate_beat(duration=30, genre="lofi", situation="chill", instruments=None, bpm=None, mood="chill", key="C", seed=None):
+def generate_beat(duration=30, genre="lofi", situation="chill", instruments=None, bpm=None, mood="chill", key="C", seed=None,
+                drums_variant=None, bass_variant=None, piano_variant=None, guitar_variant=None, synth_variant=None, progression_idx=None):
     if instruments is None: instruments = ["drums","bass","piano"]
     duration = int(duration)
     genre = str(genre).lower()
@@ -484,8 +499,11 @@ def generate_beat(duration=30, genre="lofi", situation="chill", instruments=None
     mood = str(mood).lower()
     if genre not in GENRES:
         genre = SITUATION_DEFAULTS.get(situation, {}).get("genre","lofi")
-    pm, eff_bpm, n_bars, _ = build_midi(duration, genre, situation, instruments, bpm, key, mood, seed)
-    h = hashlib.md5(f"{genre}_{situation}_{key}_{eff_bpm}_{duration}_{seed}_{instruments}_{time.time()}".encode()).hexdigest()[:6]
+    pm, eff_bpm, n_bars, _, chosen = build_midi(duration, genre, situation, instruments, bpm, key, mood, seed,
+                                                 drums_variant=drums_variant, bass_variant=bass_variant,
+                                                 piano_variant=piano_variant, guitar_variant=guitar_variant,
+                                                 synth_variant=synth_variant, progression_idx=progression_idx)
+    h = hashlib.md5(f"{genre}_{situation}_{key}_{eff_bpm}_{duration}_{seed}_{instruments}_{chosen}_{time.time()}".encode()).hexdigest()[:6]
     stem = f"beat_{int(time.time())}_{h}"
     midi_path = OUT / f"{stem}.mid"
     wav_path = OUT / f"{stem}.wav"
@@ -493,4 +511,4 @@ def generate_beat(duration=30, genre="lofi", situation="chill", instruments=None
     outs = render_midi(pm, midi_path, wav_path, mp3_path)
     return {"stem": stem, "genre": genre, "situation": situation, "key": key, "bpm": eff_bpm,
             "duration": duration, "instruments": instruments, "mood": mood,
-            "files": outs, "bars": n_bars}
+            "files": outs, "bars": n_bars, "variants": chosen}
