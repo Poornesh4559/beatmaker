@@ -124,7 +124,10 @@ app.mount("/mcp", mcp_app)
 # ── prompt → LLM → MCP generate_beat (coastal vibe etc) ──────────────
 class PromptRequest(BaseModel):
     prompt: str
-    duration: Optional[int] = None  # optional override, else LLM picks 15-60
+    duration: Optional[int] = None  # user override, else LLM picks
+    mood: Optional[str] = None      # user override
+    bpm: Optional[int] = None       # user override
+    instruments: Optional[List[str]] = None  # user override
     seed: Optional[int] = None
 
 
@@ -243,8 +246,17 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
                 raise HTTPException(500, f"LLM parse failed: {e}")
     assert raw is not None
     params = _coerce_params(raw, fallback_duration=body.duration)
+    # user overrides win over LLM
     if body.duration is not None:
         params["duration"] = max(10, min(300, int(body.duration)))
+    if body.mood is not None and str(body.mood).lower() in MOODS:
+        params["mood"] = str(body.mood).lower()
+    if body.bpm is not None:
+        try: params["bpm"] = max(60, min(180, int(body.bpm)))
+        except: pass
+    if body.instruments is not None:
+        insts = [str(x).lower() for x in body.instruments if str(x).lower() in INSTRUMENTS][:5]
+        if insts: params["instruments"] = insts
     if body.seed is not None:
         seed = int(body.seed)
     else:

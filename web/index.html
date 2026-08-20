@@ -1,70 +1,59 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>beatmaker — loop studio</title>
+<title>beatmaker — prompt studio</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#0b0f1a;color:#e8e6e3;font-family:ui-monospace,monospace}
 a{color:#a78bfa}header{padding:18px 24px;border-bottom:1px solid #1e2640;display:flex;align-items:center;gap:12px}
 h1{margin:0;font-size:18px;color:#a78bfa} .sub{color:#8b93a8;font-size:12px}
-.wrap{max-width:980px;margin:0 auto;padding:24px;display:grid;grid-template-columns:380px 1fr;gap:24px}
+.wrap{max-width:980px;margin:0 auto;padding:24px;display:grid;grid-template-columns:1fr 380px;gap:24px}
 @media(max-width:860px){.wrap{grid-template-columns:1fr}}
 .card{background:#141a2b;border:1px solid #2a3450;border-radius:12px;padding:18px}
 label{display:block;font-size:11px;color:#8b93a8;margin:10px 0 6px;text-transform:uppercase;letter-spacing:.06em}
 select,input,textarea{width:100%;padding:10px 11px;border-radius:8px;border:1px solid #2a3450;background:#0b0f1a;color:#e8e6e3;font-family:monospace;outline:none}
 select:focus,input:focus,textarea:focus{border-color:#a78bfa}
-textarea{resize:vertical;min-height:72px}
+textarea{resize:vertical;min-height:84px;font-size:14px}
 .row{display:flex;gap:10px}.row>*{flex:1}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .chip{padding:6px 10px;border-radius:999px;border:1px solid #2a3450;background:#0b0f1a;color:#e8e6e3;font-size:12px;cursor:pointer;user-select:none}
 .chip.on{background:#a78bfa;color:#0b0f1a;border-color:#a78bfa;font-weight:700}
-.btn{width:100%;padding:12px;border:0;border-radius:10px;background:#a78bfa;color:#0b0f1a;font-weight:800;cursor:pointer;font-family:monospace;font-size:14px;margin-top:14px}
-.btn.secondary{background:#1e2640;color:#e8e6e3;border:1px solid #2a3450}
+.btn{width:100%;padding:13px;border:0;border-radius:10px;background:#a78bfa;color:#0b0f1a;font-weight:800;cursor:pointer;font-family:monospace;font-size:15px;margin-top:14px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .muted{color:#8b93a8;font-size:12px;margin-top:8px}
+.hint{color:#6b7280;font-size:11px;margin-top:4px}
 audio{width:100%;margin-top:10px}
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#1e2640;border:1px solid #2a3450;font-size:11px;color:#cbd5e1;margin-right:6px;margin-bottom:4px}
 .links a{margin-right:10px;font-size:13px}
 pre{white-space:pre-wrap;word-break:break-word;background:#0b0f1a;border:1px solid #1e2640;border-radius:8px;padding:10px;font-size:12px;max-height:260px;overflow:auto}
-details{margin-top:14px;border:1px solid #1e2640;border-radius:10px;padding:10px 12px;background:#0f1426}
-details summary{cursor:pointer;color:#a78bfa;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
-.prompt-row{display:flex;gap:8px;align-items:flex-end}
-.prompt-row textarea{flex:1}
 .samples{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .sample{font-size:11px;padding:4px 8px;border-radius:999px;background:#0b0f1a;border:1px solid #2a3450;color:#8b93a8;cursor:pointer}
 .sample:hover{border-color:#a78bfa;color:#e8e6e3}
+.tweaks{margin-top:14px;padding-top:12px;border-top:1px solid #1e2640}
+.tweaks-title{font-size:11px;color:#a78bfa;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
 </style></head><body>
-<header><h1>🎵 beatmaker</h1><span class="sub">loop-based studio — prompt → LLM → MIDI → MP3</span><span style="margin-left:auto;font-size:12px" id="tokBadge"></span></header>
+<header><h1>🎵 beatmaker</h1><span class="sub">describe a scene → tweak → beat</span><span style="margin-left:auto;font-size:12px" id="tokBadge"></span></header>
 <div class="wrap">
   <div class="card">
     <label>Describe a situation / vibe</label>
-    <div class="prompt-row">
-      <textarea id="prompt" placeholder="early morning coastal town where boats are nearing the shore after fishing"></textarea>
-    </div>
+    <textarea id="prompt" placeholder="early morning coastal town where boats are nearing the shore after fishing"></textarea>
     <div class="samples" id="samples"></div>
-    <button id="promptBtn" class="btn">✨ Generate from prompt</button>
-    <div id="promptStatus" class="muted"></div>
 
-    <details id="adv">
-      <summary>Advanced — manual controls</summary>
-      <label>Duration (seconds)</label>
-      <input id="duration" type="number" min="10" max="300" value="30">
+    <div class="tweaks">
+      <div class="tweaks-title">Tweak overrides (optional — leave blank to let LLM decide)</div>
       <div class="row">
-        <div><label>Genre</label><select id="genre"></select></div>
-        <div><label>Situation</label><select id="situation"></select></div>
+        <div><label>Duration (s)</label><input id="duration" type="number" min="10" max="300" placeholder="auto (30)"></div>
+        <div><label>Mood</label><select id="mood"><option value="">auto</option></select></div>
       </div>
       <div class="row">
-        <div><label>Mood</label><select id="mood"></select></div>
-        <div><label>Key</label><select id="key"></select></div>
+        <div><label>BPM</label><input id="bpm" type="number" min="60" max="180" placeholder="auto"></div>
+        <div><label></label><div class="hint">mood tweaks genre feel; bpm overrides tempo</div></div>
       </div>
-      <div class="row">
-        <div><label>BPM (empty = auto)</label><input id="bpm" type="number" placeholder="auto" min="60" max="180"></div>
-        <div><label>Seed</label><input id="seed" type="number" placeholder="random"></div>
-      </div>
-      <label>Instruments (max 5)</label>
+      <label>Instruments (max 5 — overrides LLM picks)</label>
       <div id="chips" class="chips"></div>
-      <div class="muted">Locked to 5: drums, bass, piano, guitar, synth</div>
-      <button id="gen" class="btn secondary">Generate (manual params)</button>
-      <div id="status" class="muted"></div>
-    </details>
+      <div class="hint">No selection = LLM picks. Select to lock. Locked 5: drums, bass, piano, guitar, synth</div>
+    </div>
+
+    <button id="gen" class="btn">✨ Generate beat</button>
+    <div id="status" class="muted"></div>
   </div>
   <div class="card">
     <div style="font-size:12px;color:#8b93a8;margin-bottom:8px">OUTPUT</div>
@@ -72,7 +61,7 @@ details summary{cursor:pointer;color:#a78bfa;font-size:12px;letter-spacing:.04em
     <audio id="player" controls style="display:none"></audio>
     <div id="links" class="links" style="margin-top:10px"></div>
     <pre id="json" style="display:none"></pre>
-    <div class="muted" style="margin-top:12px">Prompt → LLM (deepseek) → <code>generate_beat</code> → FluidSynth → MP3. MCP: <code>/mcp</code><br>All beats procedural — no AI audio. <code>POST /api/prompt {prompt}</code> or <code>POST /api/generate</code>.</div>
+    <div class="muted" style="margin-top:12px">Prompt → LLM (deepseek) → <code>generate_beat</code> → FluidSynth → MP3. MCP: <code>/mcp</code> · <code>POST /api/prompt {prompt, duration?, mood?, bpm?, instruments?}</code></div>
   </div>
 </div>
 <script>
@@ -93,34 +82,32 @@ const SAMPLES=[
 function fillSamples(){
   const c=$("samples");
   SAMPLES.forEach(s=>{
-    const b=document.createElement("button"); b.className="sample"; b.textContent=s.slice(0,42)+"…"; b.title=s;
+    const b=document.createElement("button"); b.className="sample"; b.textContent=s.slice(0,44)+"…"; b.title=s;
     b.onclick=()=>{ $("prompt").value=s; };
     c.appendChild(b);
   });
 }
 
+let _options=null;
 async function loadOptions(){
   const r=await fetch("/api/options?token="+encodeURIComponent(TOK));
-  const j=await r.json();
-  for(const g of j.genres){ const o=document.createElement("option"); o.value=g; o.textContent=g; $("genre").appendChild(o); }
-  for(const s of j.situations){ const o=document.createElement("option"); o.value=s; o.textContent=s; $("situation").appendChild(o); }
+  const j=await r.json(); _options=j;
   for(const m of j.moods){ const o=document.createElement("option"); o.value=m; o.textContent=m; $("mood").appendChild(o); }
-  for(const k of j.keys){ const o=document.createElement("option"); o.value=k; o.textContent=k; $("key").appendChild(o); }
-  $("genre").value="lofi"; $("situation").value="chill"; $("mood").value="chill"; $("key").value="C";
   const labels={drums:"Drums",bass:"Bass",piano:"Piano",guitar:"Guitar",synth:"Synth"};
   for(const id of Object.keys(j.instruments)){
-    const d=document.createElement("div"); d.className="chip on"; d.dataset.id=id; d.textContent=labels[id]||id;
-    d.onclick=()=>{ d.classList.toggle("on"); const on=[...document.querySelectorAll(".chip.on")]; if(on.length>5){ d.classList.remove("on"); alert("max 5 instruments"); } };
+    const d=document.createElement("div"); d.className="chip"; d.dataset.id=id; d.textContent=labels[id]||id;
+    d.onclick=()=>{
+      d.classList.toggle("on");
+      const on=[...document.querySelectorAll(".chip.on")];
+      if(on.length>5){ d.classList.remove("on"); alert("max 5 instruments"); }
+    };
     $("chips").appendChild(d);
   }
-  $("situation").addEventListener("change",()=>{
-    const def=j.defaults[$("situation").value]; if(def){ $("genre").value=def.genre; $("mood").value=def.mood; $("bpm").placeholder="auto ("+def.bpm+")"; }
-  });
-  $("situation").dispatchEvent(new Event("change"));
 }
 
 function showOutput(j){
-  $("meta").innerHTML=`<span class=badge>${j.genre}</span><span class=badge>${j.mood}</span><span class=badge>${j.key} ${j.bpm} BPM</span><span class=badge>${j.duration}s</span><span class=badge>${(j.instruments||[]).join(", ")}</span>` + (j.prompt?`<div class=muted style="margin-top:6px">“${j.prompt}” → ${j.resolved_params?JSON.stringify(j.resolved_params):""}</div>`:"");
+  const inst = j.instruments||[];
+  $("meta").innerHTML=`<span class=badge>${j.genre}</span><span class=badge>${j.mood}</span><span class=badge>${j.key} · ${j.bpm} BPM</span><span class=badge>${j.duration}s</span><span class=badge>${inst.join(", ")}</span>` + (j.prompt?`<div class=muted style="margin-top:6px">“${j.prompt}”</div>`:"") + (j.resolved_params?`<div class=muted>→ ${JSON.stringify(j.resolved_params)}</div>`:"");
   const mp3=j.files.mp3, wav=j.files.wav, midi=j.files.midi;
   const tokQ="token="+encodeURIComponent(TOK);
   if(mp3){ $("player").src=mp3+"?"+tokQ; $("player").style.display="block"; $("player").play().catch(()=>{}); }
@@ -132,39 +119,24 @@ function showOutput(j){
   $("json").textContent=JSON.stringify(j,null,2); $("json").style.display="block";
 }
 
-$("promptBtn").onclick=async()=>{
+$("gen").onclick=async()=>{
   const prompt=$("prompt").value.trim();
-  if(!prompt){ alert("Describe a situation first — e.g. 'early morning coastal town...'"); return; }
-  $("promptBtn").disabled=true; $("promptStatus").textContent="LLM parsing prompt → generating beat…";
+  if(!prompt){ alert("Describe a situation first"); return; }
+  const selected=[...document.querySelectorAll(".chip.on")].map(c=>c.dataset.id);
+  const body={
+    prompt,
+    duration: $("duration").value ? parseInt($("duration").value) : undefined,
+    mood: $("mood").value || undefined,
+    bpm: $("bpm").value ? parseInt($("bpm").value) : undefined,
+    instruments: selected.length ? selected : undefined,
+  };
+  $("gen").disabled=true; $("status").textContent="LLM parsing → generating beat…";
   $("meta").innerHTML=""; $("links").innerHTML=""; $("json").style.display="none"; $("player").style.display="none";
   try{
-    const body={prompt, duration: parseInt($("duration").value)||undefined};
     const r=await fetch("/api/prompt?token="+encodeURIComponent(TOK),{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOK},body:JSON.stringify(body)});
     if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,800)); }
     const j=await r.json();
-    $("promptStatus").textContent=`done ✓ — ${j.genre} · ${j.mood} · ${j.bpm} BPM · ${j.bars} bars`;
-    showOutput(j);
-  }catch(e){ $("promptStatus").textContent="error: "+e.message; }
-  finally{ $("promptBtn").disabled=false; }
-};
-
-$("gen").onclick=async()=>{
-  const instruments=[...document.querySelectorAll(".chip.on")].map(c=>c.dataset.id);
-  if(!instruments.length){ alert("pick at least 1 instrument"); return; }
-  const body={
-    duration: parseInt($("duration").value)||30,
-    genre: $("genre").value, situation: $("situation").value, mood: $("mood").value, key: $("key").value,
-    instruments,
-    bpm: $("bpm").value ? parseInt($("bpm").value) : null,
-    seed: $("seed").value ? parseInt($("seed").value) : null
-  };
-  $("gen").disabled=true; $("status").textContent="generating…";
-  $("meta").innerHTML=""; $("links").innerHTML=""; $("json").style.display="none"; $("player").style.display="none";
-  try{
-    const r=await fetch("/api/generate?token="+encodeURIComponent(TOK),{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOK},body:JSON.stringify(body)});
-    if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,600)); }
-    const j=await r.json();
-    $("status").textContent="done ✓ — "+j.bars+" bars @ "+j.bpm+" BPM";
+    $("status").textContent=`done ✓ — ${j.genre} · ${j.mood} · ${j.bpm} BPM · ${j.bars} bars`;
     showOutput(j);
   }catch(e){ $("status").textContent="error: "+e.message; }
   finally{ $("gen").disabled=false; }
