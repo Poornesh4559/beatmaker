@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/muse-spark-1.2-contributor",
+  "mcp": {
+    "beatmaker": {
+      "type": "local",
+      "command": ["/home/ubuntu/beatmaker/.venv/bin/python", "-m", "beatmaker.mcp_server"],
+      "cwd": "/home/ubuntu/beatmaker",
+      "enabled": true
+    }
+  }
+}

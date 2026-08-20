@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+output/*.mid
+output/*.wav
+output/*.mp3
+data/soundfont/*.sf2
+.work/
