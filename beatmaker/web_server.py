@@ -10,6 +10,9 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
 from beatmaker.engine import INSTRUMENTS, GENRES, SITUATIONS, MOODS, KEYS, SITUATION_DEFAULTS
+from beatmaker.vocabulary import (
+    GENRES as V2_GENRES, MOOD_RULES, PROGRESSIONS as V2_PROGRESSIONS, MIX_PRESETS,
+)
 import beatmaker.mcp_server as mcp_mod
 
 REPO = Path(__file__).resolve().parent.parent
@@ -91,16 +94,12 @@ async def options():
 @app.post("/api/generate")
 async def generate(req: Request, body: BeatRequest):
     require_auth(req)
-    # clamp
+    # LEGACY: direct-override path kept alive per spec §7 until Phase 5 confirmation.
     instruments = [i for i in body.instruments if i in INSTRUMENTS][:5]
     if not instruments: instruments=["drums","bass","piano"]
-    result = mcp_mod.mcp  # use engine via mcp tool wrapper
     from beatmaker.engine import generate_beat
     out = generate_beat(duration=body.duration, genre=body.genre, situation=body.situation,
                         instruments=instruments, bpm=body.bpm, mood=body.mood, key=body.key, seed=body.seed)
-    # expose relative urls
-    stem = out["stem"]
-    # check which files exist
     files={}
     for k in ("midi","wav","mp3"):
         p = Path(out["files"][k])
@@ -121,11 +120,11 @@ async def serve_output(name: str, request: Request):
 app.mount("/mcp", mcp_app)
 
 
-# ── prompt → LLM → MCP generate_beat (coastal vibe etc) ──────────────
+# ── prompt → LLM → plan_beat → render_beat (coastal vibe etc) ──────────────
 class PromptRequest(BaseModel):
     prompt: str
     duration: Optional[int] = None  # user override, else LLM picks
-    mood: Optional[str] = None      # user override
+    mood: Optional[str] = None      # user override (semantic hint, also applied as plan override)
     bpm: Optional[int] = None       # user override
     instruments: Optional[List[str]] = None  # user override
     seed: Optional[int] = None
@@ -177,6 +176,8 @@ def _parse_json(text: str) -> Dict[str, Any]:
 
 
 def _coerce_params(raw: Dict[str, Any], fallback_duration: Optional[int] = None) -> Dict[str, Any]:
+    # LEGACY v1 coerce kept only for /api/generate fallback path; /api/prompt
+    # now routes through planning.plan_beat directly (spec §3).
     genre = str(raw.get("genre", "chill")).lower()
     if genre not in GENRES:
         genre = "chill"
@@ -205,16 +206,11 @@ def _coerce_params(raw: Dict[str, Any], fallback_duration: Optional[int] = None)
     except:
         dur = 30
     dur = max(10, min(120, dur))
-    # per-instrument variants + progression — LLM can pin 0-2 / 0-5, or leave None for random
     def _var(v):
-        try:
-            iv = int(v)
-            return iv if 0 <= iv <= 2 else None
+        try: iv = int(v); return iv if 0 <= iv <= 2 else None
         except: return None
     def _prog(v):
-        try:
-            iv = int(v)
-            return iv if 0 <= iv <= 5 else None
+        try: iv = int(v); return iv if 0 <= iv <= 5 else None
         except: return None
     variants = {
         "drums_variant": _var(raw.get("drums_variant")),
@@ -227,87 +223,166 @@ def _coerce_params(raw: Dict[str, Any], fallback_duration: Optional[int] = None)
     return {"genre": genre, "mood": mood, "key": key, "instruments": insts, "bpm": bpm, "duration": dur, **variants}
 
 
+def _llm_prompt_preamble():
+    return (
+        "You are a music director for 'beatmaker', a loop-based procedural studio.\n"
+        "You own SEMANTIC decisions — genre/mood→key/mode, progression, energy arc, instrumentation.\n"
+        "Do not compute indexes/ticks/velocities; only pick from NAMED, DESCRIBED options.\n"
+        f"Genres: {', '.join(sorted(V2_GENRES))} | Moods: {', '.join(sorted(MOOD_RULES))}\n"
+        "Genre details (bpm_range, drum_style, default_instruments, progressions):\n"
+        + "\n".join(
+            f"- {g}: bpm={cfg['bpm_range']} drum={cfg['drum_style']} inst={cfg['default_instruments']} progs={cfg['progressions']}"
+            for g, cfg in sorted(V2_GENRES.items())
+        )
+        + "\nNamed progressions (LLM-facing names with feel):\n"
+        + "\n".join(f"- {n}: mode={c['mode']} feel={c['feel']} degrees={c['degrees']}"
+                    for n, c in sorted(V2_PROGRESSIONS.items()))
+        + "\n\nRespond with ONLY JSON."
+    )
+
+def _llm_response_schema_hint():
+    return (
+        "Reply with ONLY this JSON object: "
+        '{"genre":"...","mood":"...","key":"C","mode":"major","bpm":92,'
+        '"progression":"vi-IV-I-V","drum_style":"boom_bap",'
+        '"energy_curve":["low","low","med","med"],"instruments":["drums","bass","piano"]}'
+        " No prose, no fences. Always include mood, mode, progression, drum_style."
+    )
+
+def _parse_llm_plan_json(text: str) -> Dict[str, Any]:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text).rstrip("`").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        s, e = text.find("{"), text.rfind("}")
+        if s == -1 or e <= s:
+            raise ValueError(f"no JSON object found; raw: {text[:400]}")
+        data = json.loads(text[s:e+1])
+    if not isinstance(data, dict):
+        raise ValueError("expected JSON object")
+    return data
+
+
 @app.post("/api/prompt")
 async def prompt_to_beat(req: Request, body: PromptRequest):
     require_auth(req)
     prompt = body.prompt.strip()
     if not prompt:
         raise HTTPException(400, "empty prompt")
-    system = (
-        "You are a music director for 'beatmaker', a loop-based procedural beat studio.\n"
-        "The user describes a SITUATION/SCENE in plain English. Map it to beat params WITH VARIATION.\n"
-        f"Genres: {', '.join(GENRES)} | Moods: {', '.join(MOODS)} | Keys: {', '.join(KEYS)} | Instruments: {', '.join(INSTRUMENTS)} (max 5).\n"
-        "Situation defaults for reference (genre/bpm/mood):\n"
-        + "\n".join(f"- {k}: {v}" for k, v in SITUATION_DEFAULTS.items()) + "\n"
-        "VARIATION KNOBS (use them! different prompts should give different feels):\n"
-        "- progression_idx 0-5: chord progression (0=warm, 2=tense, 5=jazzy). Pick differently per prompt mood.\n"
-        "- drums_variant 0-2: 0=straight/boom,1=syncopated/rim,2=busy/fills.\n"
-        "- bass_variant 0-2: 0=roots,1=syncopated,2=walking.\n"
-        "- piano_variant 0-2: 0=arp,1=block,2=sparse.\n"
-        "- guitar_variant 0-2: 0=strum,1=fingerpick,2=mutes.\n"
-        "- synth_variant 0-2: 0=pad,1=arp,2=pulse.\n"
-        "Rules:\n"
-        "- Pick genre that fits scene energy (coastal morning=ambient/chill, club=edm, heist=trap).\n"
-        "- Pick mood that fits emotion (serene=dreamy, tense=dark, joyful=happy).\n"
-        "- Pick key: C/F=warm, G/D=bright, A#/E=dark. VARY key across prompts.\n"
-        "- Pick instruments that fit texture. VARY them — coastal might be piano+synth one time, guitar+bass another.\n"
-        "- Pick bpm 60-180 that fits tempo. VARY bpm even within same mood.\n"
-        "- ALWAYS set at least 3 variant knobs to non-None values — this is how variation happens.\n"
-        "Reply with ONLY this JSON: {\"genre\":\"...\",\"mood\":\"...\",\"key\":\"...\",\"instruments\":[\"...\"],\"bpm\":72,\"duration\":30,\"progression_idx\":2,\"drums_variant\":1,\"bass_variant\":0,\"piano_variant\":2,\"guitar_variant\":0,\"synth_variant\":1}\n"
-        "No prose, no fences."
-    )
+
+    # LLM owns semantics; code owns cross-track structure. The LLM must pick
+    # only from NAMED, DESCRIBED options — never indexes/ticks/velocities.
+    system = _llm_prompt_preamble() + "\n" + _llm_response_schema_hint()
     user = f"Situation: {prompt}"
-    # Best practice for randomness per web research: LLMs at low temp are deterministic for same prompt.
-    # Add a short random nonce to the user message so same text still samples differently (temperature + nonce).
-    # Also instruct LLM to VARY — don't repeat same variant picks.
-    nonce = secrets.token_hex(2)  # 4 hex chars, cheap entropy
-    user_with_nonce = f"{user} [variation seed: {nonce} — pick variants/progression differently each time even for similar prompts]"
-    # LLM parse, with one retry on bad JSON
+    nonce = secrets.token_hex(2)
+    user_with_nonce = (
+        f"{user} [variation seed: {nonce} — pick variants/progression "
+        "differently each time even for similar prompts]"
+    )
+
     raw: Optional[Dict[str, Any]] = None
     last_text = ""
     for attempt in range(2):
         try:
-            text = await _call_opencode(system, user_with_nonce if attempt == 0 else f"{user_with_nonce}\n\nPrevious reply was invalid JSON:\n{last_text[:400]}\nFix it — ONLY JSON.")
+            text = await _call_opencode(
+                system,
+                user_with_nonce if attempt == 0
+                else f"{user_with_nonce}\n\nPrevious reply was invalid JSON:\n{last_text[:400]}\nFix it — ONLY JSON.",
+            )
             last_text = text
-            raw = _parse_json(text)
+            raw = _parse_llm_plan_json(text)
+            # quick shape guard — surface LLM hallucinations early
+            if not all(k in raw for k in ("genre", "mood", "progression")):
+                raise ValueError(f"LLM JSON missing required keys (genre/mood/progression): {list(raw.keys())}")
             break
         except Exception as e:
             last_text = str(e)
             if attempt == 1:
                 raise HTTPException(500, f"LLM parse failed: {e}")
     assert raw is not None
-    params = _coerce_params(raw, fallback_duration=body.duration)
-    # user overrides win over LLM
-    if body.duration is not None:
-        params["duration"] = max(10, min(300, int(body.duration)))
-    if body.mood is not None and str(body.mood).lower() in MOODS:
-        params["mood"] = str(body.mood).lower()
+
+    # ── requested duration (web controls override LLM suggestion) ──────────
+    req_duration: float = body.duration or raw.get("duration") or 16
+    try:
+        req_duration = float(req_duration)
+    except Exception:
+        req_duration = 16.0
+    req_duration = max(4, min(600, req_duration))
+
+    # ── mood hint from front-end tweaks (body.mood/bpm/instruments) ─────────
+    # If the user explicitly tweaked mood/bpm/instruments on the web UI, those
+    # pin plan_beat overrides; otherwise the LLM's suggestions stand.
+    tween_mood = (body.mood.strip().lower() if body.mood and body.mood.strip() else None)
+    # body.mood is optional override — also used as the primary mood signal
+    # for plan_beat when the LLM's mood is surprising / empty.
+    effective_mood: str = (tween_mood or str(raw.get("mood", "")).lower().strip() or "chill")
+
+    overrides: Dict[str, Any] = {}
+    # genre/key/mode/bpm/progression/drum_style/instruments: apply LLM suggestion,
+    # then let web overrides win on duration/bpm/instruments
+    for k in ("genre", "key", "mode", "progression", "drum_style"):
+        if raw.get(k) is not None and raw[k] not in ("", []):
+            overrides[k] = raw[k]
+    if raw.get("bpm") is not None:
+        overrides["bpm"] = raw["bpm"]
+    if raw.get("instruments") is not None:
+        overrides["instruments"] = raw["instruments"]
+    if raw.get("energy_curve") is not None:
+        overrides["energy_curve"] = raw["energy_curve"]
+
+    # web tweaks override LLM
     if body.bpm is not None:
-        try: params["bpm"] = max(60, min(180, int(body.bpm)))
-        except: pass
+        try: overrides["bpm"] = int(body.bpm)
+        except Exception: pass
     if body.instruments is not None:
         insts = [str(x).lower() for x in body.instruments if str(x).lower() in INSTRUMENTS][:5]
-        if insts: params["instruments"] = insts
-    if body.seed is not None:
-        seed = int(body.seed)
-    else:
-        # Random seed when user doesn't pin one — true per-call variation even for same prompt text.
-        # Engine uses Random(seed) for prog/variant picks, so random seed = different feel each hit.
-        seed = secrets.randbits(31)
-    from beatmaker.engine import generate_beat
-    out = generate_beat(duration=params["duration"], genre=params["genre"], situation="chill",
-                        instruments=params["instruments"], bpm=params["bpm"], mood=params["mood"], key=params["key"], seed=seed,
-                        drums_variant=params.get("drums_variant"), bass_variant=params.get("bass_variant"),
-                        piano_variant=params.get("piano_variant"), guitar_variant=params.get("guitar_variant"),
-                        synth_variant=params.get("synth_variant"), progression_idx=params.get("progression_idx"))
+        if insts:
+            overrides["instruments"] = insts
+    if tween_mood and tween_mood not in overrides.get("mood", ""):
+        # tween mood is already the effective signal; plan_beat's mood param handles it,
+        # but also surface it in overrides for docs. Nothing else needed.
+
+        pass
+
+    # ── spec §3 validation lives INSIDE plan_beat; every rejection names field
+    # and lists valid values so the LLM can self-correct on next call ───────
+    from beatmaker.planning import (
+        Plan as V2Plan, ToolError as PlanningToolError,
+        plan_beat as core_plan_beat, plan_to_dict, plan_from_dict,
+    )
+    from beatmaker.render_beat import render_beat as core_render_beat
+
+    try:
+        plan: V2Plan = core_plan_beat(
+            prompt=prompt, mood=effective_mood,
+            duration=req_duration, overrides=overrides,
+        )
+    except PlanningToolError as e:
+        # §3 contract: call the error back as JSON with the message intact so
+        # the caller (web or an MCP LLM) can fix and retry.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    rendered = core_render_beat(plan)
+    # Shape response to keep web/index.html contract stable (genre/key/bpm/instruments/etc)
     files: Dict[str, Optional[str]] = {}
-    for k in ("midi", "wav", "mp3"):
-        p = Path(out["files"][k])
-        files[k] = f"/output/{p.name}" if p.exists() else None
+    # rendered files use keys mid/wav/mp3
+    mid = rendered["files"].get("mid") or rendered["files"].get("midi")
+    for k, p in (("midi", mid), ("wav", rendered["files"].get("wav")), ("mp3", rendered["files"].get("mp3"))):
+        path = Path(p) if p else None
+        files[k] = f"/output/{path.name}" if path and path.exists() else None
+    bar_seconds = 240.0 / plan.bpm if plan.bpm else 4.0
     tok = _tok(req) or ""
-    out["files"] = files
-    out["download"] = {k: f"{v}?token={tok}" for k, v in files.items() if v}
-    out["parsed_prompt"] = raw
-    out["resolved_params"] = params
-    out["prompt"] = prompt
-    return out
+    return {
+        "genre": plan.genre, "key": plan.key, "mode": plan.mode,
+        "bpm": plan.bpm, "progression": plan.progression,
+        "drum_style": plan.drum_style, "energy_curve": list(plan.energy_curve),
+        "instruments": list(plan.instruments),
+        "duration": float(plan.duration), "rationale": plan.rationale,
+        "bars": max(1, math.ceil(float(plan.duration) / bar_seconds)),
+        "files": files, "download": {k: f"{v}?token={tok}" for k, v in files.items() if v},
+        "parsed_prompt": raw, "resolved_params": plan_to_dict(plan),
+        "prompt": prompt, "summary": rendered["musical_summary"],
+        "pattern_preview": rendered["pattern_preview"],
+    }
