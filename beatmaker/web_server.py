@@ -1,7 +1,7 @@
 
 """beatmaker web server — studio UI + API + MCP over HTTP."""
 from __future__ import annotations
-import os, hmac, secrets, json, asyncio, re, shutil
+import os, hmac, secrets, json, asyncio, re, shutil, math
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
