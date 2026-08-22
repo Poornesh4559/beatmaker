@@ -227,7 +227,10 @@ def _llm_prompt_preamble():
     return (
         "You are a music director for 'beatmaker', a loop-based procedural studio.\n"
         "You own SEMANTIC decisions — genre/mood→key/mode, progression, energy arc, instrumentation.\n"
-        "Do not compute indexes/ticks/velocities; only pick from NAMED, DESCRIBED options.\n"
+        "Do NOT invent sub-symbolic details; only pick from NAMED, DESCRIBED options. "
+        "VARY your choices — different prompts/situations should produce different genre, "
+        "key, bpm, drum_style and progressions; repeated prompts may still pick differently "
+        "when the user clicks again.\n"
         f"Genres: {', '.join(sorted(V2_GENRES))} | Moods: {', '.join(sorted(MOOD_RULES))}\n"
         "Genre details (bpm_range, drum_style, default_instruments, progressions):\n"
         + "\n".join(
@@ -360,9 +363,16 @@ async def prompt_to_beat(req: Request, body: PromptRequest):
             duration=req_duration, overrides=overrides,
         )
     except PlanningToolError as e:
-        # §3 contract: call the error back as JSON with the message intact so
-        # the caller (web or an MCP LLM) can fix and retry.
         raise HTTPException(status_code=400, detail=str(e))
+
+    # ── per-hit variation within plan bounds (never overrides user's web tweaks):
+    # 1) humanize jitter reseeded from OS entropy each render, so the same
+    #    plan twice produces different micro-timing. 2) small bpm jitter ±2
+    #    when the bpm came from the LLM (not from a pinned web override).
+    if "bpm" not in overrides:
+        import random as _rand2
+        j = _rand2.randint(-2, 2)
+        plan.bpm = max(30, min(240, int(plan.bpm) + j))
 
     rendered = core_render_beat(plan)
     # Shape response to keep web/index.html contract stable (genre/key/bpm/instruments/etc)

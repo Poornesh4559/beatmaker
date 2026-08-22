@@ -229,10 +229,17 @@ def compose_midi(plan: Plan) -> pretty_midi.PrettyMIDI:
     return pm
 
 
-def apply_humanize(plan: Plan, pm: pretty_midi.PrettyMIDI) -> None:
-    """§4.6 across all tracks — swing on odd 16ths + jitter. Deterministic given seed."""
-    import random as _random
-    rng = _random.Random(f"{plan.genre}|{plan.key}|{plan.mode}|{plan.bpm}|{plan.progression}")
+def apply_humanize(plan: Plan, pm: pretty_midi.PrettyMIDI, seed=None) -> None:
+    """§4.6 across all tracks — swing on odd 16ths + jitter.
+
+    When seed is None the jitter is non-deterministic (fresh OS entropy) so
+    the same Plan rendered twice produces subtly different timing/velocities.
+    Pass an int seed for deterministic tests. No pattern structure is changed.
+    """
+    import random as _random, secrets as _secrets
+    if seed is None:
+        seed = _secrets.randbits(31)
+    rng = _random.Random(seed)
     step_seconds = (240.0 / plan.bpm) / 16.0
     cfg = SWING_TABLE[plan.drum_style]
     for inst in pm.instruments:
@@ -342,10 +349,11 @@ def render_stems_and_mix(pm: pretty_midi.PrettyMIDI, midi_path: Path,
 # ── public entry ─────────────────────────────────────────────────────────────
 
 def render_beat(plan: Plan, out_dir: Path = OUT_DIR,
-                tag: str = "v2") -> Dict:
-    """Deterministic render of a Plan. Returns files + musical summary + preview."""
+                tag: str = "v2", humanize_seed=None) -> Dict:
+    """Deterministic when humanize_seed is pinned; non-deterministic (and
+    therefore creative) by default. Returns files + musical summary + preview."""
     pm = compose_midi(plan)
-    apply_humanize(plan, pm)
+    apply_humanize(plan, pm, seed=humanize_seed)
 
     stamp = __import__("time").strftime("%Y%m%d_%H%M%S")
     stem = f"{tag}_{plan.genre}_{stamp}"
